@@ -128,6 +128,10 @@ internal static partial class Win32Native
     [DllImport("user32.dll", EntryPoint = "RegisterClassExW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
 
+    [DllImport("user32.dll", EntryPoint = "UnregisterClassW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterClass(string lpClassName, IntPtr hInstance);
+
     [DllImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateWindowEx(
                                                 int dwExStyle,

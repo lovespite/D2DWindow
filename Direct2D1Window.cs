@@ -180,7 +180,6 @@ public abstract class Direct2D1Window : IDisposable
 
         _renderTarget = new WindowRenderTarget(_factory, renderTargetProperties, hwndRenderTargetProperties);
         _renderTarget.AntialiasMode = AntialiasMode.PerPrimitive;
-        _renderTarget.TextAntialiasMode = TextAntialiasMode.Cleartype;
         _isDeviceReady = true;
         OnDeviceReady(_renderTarget);
     }
@@ -199,22 +198,30 @@ public abstract class Direct2D1Window : IDisposable
         _lastFrameTicks = _sw.ElapsedTicks;
         var msg = new Win32Native.MSG();
 
-        while (true)
+        try
         {
-            // 使用 PeekMessage 检查消息
-            if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
+            while (true)
             {
-                if (msg.message == Win32Native.WM_QUIT)
-                    break;
+                // 使用 PeekMessage 检查消息
+                if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
+                {
+                    if (msg.message == Win32Native.WM_QUIT)
+                        break;
 
-                Win32Native.TranslateMessage(ref msg);
-                Win32Native.DispatchMessage(ref msg);
+                    Win32Native.TranslateMessage(ref msg);
+                    Win32Native.DispatchMessage(ref msg);
+                }
+                else
+                {
+                    // 空闲时进行渲染
+                    RenderFrame();
+                }
             }
-            else
-            {
-                // 空闲时进行渲染
-                RenderFrame();
-            }
+
+        }
+        finally
+        {
+            Dispose();
         }
     }
 
@@ -459,6 +466,22 @@ public abstract class Direct2D1Window : IDisposable
     {
         _renderTarget?.Dispose();
         _factory?.Dispose();
+
+        if (_handle != IntPtr.Zero)
+        {
+            // 1. 尝试销毁窗口
+            // 如果是因为异常退出循环，窗口此时还存在，必须销毁。
+            // 如果是因为用户点击关闭，窗口已被系统销毁，此调用会失败但无害。
+            // 注意：DestroyWindow 必须在创建窗口的线程（主线程）调用。
+            Win32Native.DestroyWindow(_handle);
+
+            // 2. 注销窗口类
+            // 只有当该类没有关联的窗口时，注销才会成功，所以必须先 DestroyWindow
+            IntPtr hInstance = Win32Native.GetModuleHandle(null);
+            Win32Native.UnregisterClass(WindowClassName, hInstance);
+
+            _handle = IntPtr.Zero;
+        }
 
         // 窗口销毁通常在 WM_DESTROY 处理，这里仅作为补充清理
         _handle = IntPtr.Zero;
