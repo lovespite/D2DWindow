@@ -73,10 +73,12 @@ internal static partial class Win32Native
     public const int PM_REMOVE = 0x0001;
 
     // --- 委托 ---
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     // --- 结构体 ---
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct WNDCLASSEX
     {
         [MarshalAs(UnmanagedType.U4)]
@@ -123,10 +125,10 @@ internal static partial class Win32Native
     }
 
     // --- API 导入 ---
-    [DllImport("user32.dll", EntryPoint = "RegisterClassExA", SetLastError = true)]
+    [DllImport("user32.dll", EntryPoint = "RegisterClassExW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
 
-    [DllImport("user32.dll", EntryPoint = "CreateWindowExA", SetLastError = true, CharSet = CharSet.Auto)]
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateWindowEx(
                                                 int dwExStyle,
                                                 string lpClassName,
@@ -149,11 +151,11 @@ internal static partial class Win32Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UpdateWindow(IntPtr hWnd);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "GetMessageW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "PeekMessageW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
 
@@ -161,13 +163,13 @@ internal static partial class Win32Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool TranslateMessage(ref MSG lpMsg);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "DispatchMessageW")]
     public static partial IntPtr DispatchMessage(ref MSG lpMsg);
 
     [LibraryImport("user32.dll")]
     public static partial void PostQuitMessage(int nExitCode);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
     public static partial IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
 
     [LibraryImport("user32.dll", EntryPoint = "LoadCursorW")]

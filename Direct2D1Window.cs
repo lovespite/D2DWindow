@@ -1,5 +1,6 @@
 ﻿using SharpDX;
 using SharpDX.Direct2D1;
+using SharpDX.Mathematics.Interop;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -12,10 +13,13 @@ namespace D2DWindow;
 /// </summary>
 public abstract class Direct2D1Window : IDisposable
 {
+    private readonly Stopwatch _sw = new();
+    private long _lastFrameTicks = 0;
     private IntPtr _handle;
     private Win32Native.WndProcDelegate? _wndProcDelegate;
-    private string _className;
+    public abstract string WindowClassName { get; }
     private bool _isDeviceReady;
+    private RawColor4 _backgroundColor = new(0, 0, 0, 1); // 默认黑色背景
 
     // Direct2D 资源
     private Factory1? _factory;
@@ -26,6 +30,11 @@ public abstract class Direct2D1Window : IDisposable
     public int Width { get; private set; }
     public int Height { get; private set; }
     public bool IsDeviceReady => _isDeviceReady;
+    public RawColor4 BackgroundColor
+    {
+        get => _backgroundColor;
+        set => _backgroundColor = value;
+    }
 
     // 鼠标当前状态（用于逻辑查询）
     public Point MousePosition { get; private set; }
@@ -105,7 +114,6 @@ public abstract class Direct2D1Window : IDisposable
         Title = title;
         Width = width;
         Height = height;
-        _className = "Pixi2D_GameWindow_" + Guid.NewGuid().ToString("N");
 
         CreateInternal();
         InitializeDirect2D();
@@ -120,13 +128,15 @@ public abstract class Direct2D1Window : IDisposable
         IntPtr hInstance = Win32Native.GetModuleHandle(null);
         _wndProcDelegate = new Win32Native.WndProcDelegate(WndProc);
 
-        var wndClass = new Win32Native.WNDCLASSEX();
-        wndClass.cbSize = Marshal.SizeOf(typeof(Win32Native.WNDCLASSEX));
-        wndClass.style = Win32Native.CS_HREDRAW | Win32Native.CS_VREDRAW | Win32Native.CS_OWNDC;
-        wndClass.lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate);
-        wndClass.hInstance = hInstance;
-        wndClass.hCursor = Win32Native.LoadCursor(IntPtr.Zero, Win32Native.IDC_ARROW);
-        wndClass.lpszClassName = _className;
+        var wndClass = new Win32Native.WNDCLASSEX
+        {
+            cbSize = Marshal.SizeOf<Win32Native.WNDCLASSEX>(),
+            style = Win32Native.CS_HREDRAW | Win32Native.CS_VREDRAW | Win32Native.CS_OWNDC,
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
+            hInstance = hInstance,
+            hCursor = Win32Native.LoadCursor(IntPtr.Zero, Win32Native.IDC_ARROW),
+            lpszClassName = WindowClassName
+        };
 
         if (Win32Native.RegisterClassEx(ref wndClass) == 0)
         {
@@ -140,7 +150,7 @@ public abstract class Direct2D1Window : IDisposable
 
         _handle = Win32Native.CreateWindowEx(
             dwExStyle: 0,
-            lpClassName: _className,
+            lpClassName: wndClass.lpszClassName,
             lpWindowName: Title,
             dwStyle: Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE,
             Win32Native.CW_USEDEFAULT, Win32Native.CW_USEDEFAULT,
@@ -165,10 +175,12 @@ public abstract class Direct2D1Window : IDisposable
         {
             Hwnd = _handle,
             PixelSize = new Size2(Width, Height),
-            PresentOptions = PresentOptions.None, // 垂直同步可在这里控制
+            PresentOptions = PresentOptions.None, // 垂直同步可在这里控制 
         };
 
         _renderTarget = new WindowRenderTarget(_factory, renderTargetProperties, hwndRenderTargetProperties);
+        _renderTarget.AntialiasMode = AntialiasMode.PerPrimitive;
+        _renderTarget.TextAntialiasMode = TextAntialiasMode.Cleartype;
         _isDeviceReady = true;
         OnDeviceReady(_renderTarget);
     }
@@ -183,6 +195,8 @@ public abstract class Direct2D1Window : IDisposable
 
         OnLoad();
 
+        _sw.Start();
+        _lastFrameTicks = _sw.ElapsedTicks;
         var msg = new Win32Native.MSG();
 
         while (true)
@@ -231,9 +245,14 @@ public abstract class Direct2D1Window : IDisposable
     {
         if (_renderTarget is null) return;
 
+        long currentTicks = _sw.ElapsedTicks;
+        float deltaTimeInSeconds = (currentTicks - _lastFrameTicks) / (float)Stopwatch.Frequency;
+        _lastFrameTicks = currentTicks;
+
         _renderTarget.BeginDraw();
-        // 我们不在这里强制 Clear，交给子类 OnPaint 决定是否 Clear 以及用什么颜色
-        OnPaint(_renderTarget);
+        _renderTarget.Clear(_backgroundColor);
+
+        OnPaint(_renderTarget, deltaTimeInSeconds);
 
         try
         {
@@ -253,7 +272,7 @@ public abstract class Direct2D1Window : IDisposable
     /// 子类必须实现的绘制方法。
     /// 每一帧都会被调用。
     /// </summary>
-    protected abstract void OnPaint(RenderTarget target);
+    protected abstract void OnPaint(RenderTarget target, float deltaTimeInSeconds);
 
     /// <summary>
     /// Raises the device ready event to signal that the specified render target is prepared for use.
@@ -288,6 +307,7 @@ public abstract class Direct2D1Window : IDisposable
         {
             case Win32Native.WM_DESTROY:
                 Win32Native.PostQuitMessage(0);
+                Win32Native.DestroyWindow(_handle);
                 return IntPtr.Zero;
 
             case Win32Native.WM_ERASEBKGND:
@@ -368,7 +388,6 @@ public abstract class Direct2D1Window : IDisposable
                 }
 
             case Win32Native.WM_CHAR:
-                if (KeyPress is not null)
                 {
                     UpdateKeyPressInfo(wParam, out var c, out var modifiers);
                     OnKeyPress(c, modifiers);
