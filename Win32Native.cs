@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace NativeWindow;
+namespace D2DWindow;
 
 /// <summary>
 /// 包含所有 user32.dll 和 kernel32.dll 的 P/Invoke 声明。
@@ -11,10 +11,32 @@ internal static partial class Win32Native
     public const int CS_HREDRAW = 0x0002;
     public const int CS_VREDRAW = 0x0001;
     public const int CS_OWNDC = 0x0020;
-     
+
     public const int VK_SHIFT = 0x10;
     public const int VK_CONTROL = 0x11;
     public const int VK_MENU = 0x12; // Alt
+
+    // --- MessageBox 常量 ---
+    public const uint MB_OK = 0x00000000;
+    public const uint MB_OKCANCEL = 0x00000001;
+    public const uint MB_YESNO = 0x00000004;
+
+    public const uint MB_ICONHAND = 0x00000010;
+    public const uint MB_ICONQUESTION = 0x00000020;
+    public const uint MB_ICONEXCLAMATION = 0x00000030;
+    public const uint MB_ICONASTERISK = 0x00000040;
+
+    public const uint MB_ICONINFORMATION = MB_ICONASTERISK;
+    public const uint MB_ICONWARNING = MB_ICONEXCLAMATION;
+    public const uint MB_ICONERROR = MB_ICONHAND;
+
+    // --- SetWindowPos Constants ---
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_SHOWWINDOW = 0x0040;
 
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
@@ -101,68 +123,81 @@ internal static partial class Win32Native
     }
 
     // --- API 导入 ---
-    [DllImport("user32.dll",   SetLastError = true)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Interoperability", "SYSLIB1054:使用 “LibraryImportAttribute” 而不是 “DllImportAttribute” 在编译时生成 P/Invoke 封送代码", Justification = "<挂起>")]
+    [DllImport("user32.dll", EntryPoint = "RegisterClassExA", SetLastError = true)]
     public static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
 
-    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true, CharSet = CharSet.Unicode)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Interoperability", "SYSLIB1054:使用 “LibraryImportAttribute” 而不是 “DllImportAttribute” 在编译时生成 P/Invoke 封送代码", Justification = "<挂起>")]
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExA", SetLastError = true, CharSet = CharSet.Auto)]
     public static extern IntPtr CreateWindowEx(
-        int dwExStyle,
-        string lpClassName,
-        string lpWindowName,
-        int dwStyle,
-        int x,
-        int y,
-        int nWidth,
-        int nHeight,
-        IntPtr hWndParent,
-        IntPtr hMenu,
-        IntPtr hInstance,
-        IntPtr lpParam);
+                                                int dwExStyle,
+                                                string lpClassName,
+                                                string lpWindowName,
+                                                int dwStyle,
+                                                int x,
+                                                int y,
+                                                int nWidth,
+                                                int nHeight,
+                                                IntPtr hWndParent,
+                                                IntPtr hMenu,
+                                                IntPtr hInstance,
+                                                IntPtr lpParam);
 
-    [LibraryImport("user32.dll", EntryPoint = "ShowWindowW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-    [LibraryImport("user32.dll", EntryPoint = "UpdateWindowW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UpdateWindow(IntPtr hWnd);
 
-    [LibraryImport("user32.dll", EntryPoint = "GetMessageW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
-    [LibraryImport("user32.dll", EntryPoint = "PeekMessageW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
 
-    [LibraryImport("user32.dll", EntryPoint = "TranslateMessageW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool TranslateMessage(ref MSG lpMsg);
 
-    [LibraryImport("user32.dll", EntryPoint = "DispatchMessageW")]
+    [LibraryImport("user32.dll")]
     public static partial IntPtr DispatchMessage(ref MSG lpMsg);
 
-    [LibraryImport("user32.dll", EntryPoint = "PostQuitMessageW")]
+    [LibraryImport("user32.dll")]
     public static partial void PostQuitMessage(int nExitCode);
 
-    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    [LibraryImport("user32.dll")]
     public static partial IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
 
     [LibraryImport("user32.dll", EntryPoint = "LoadCursorW")]
     public static partial IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
 
-    [LibraryImport("user32.dll", EntryPoint = "AdjustWindowRectW")]
+    [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool AdjustWindowRect(ref RECT lpRect, int dwStyle, [MarshalAs(UnmanagedType.Bool)] bool bMenu);
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr GetModuleHandle(string? lpModuleName);
 
-    [LibraryImport("user32.dll", EntryPoint = "DestroyWindowW", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
     public static partial void DestroyWindow(IntPtr hWnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowPos")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowPos(
+                                            IntPtr hWnd,
+                                            IntPtr hWndInsertAfter,
+                                            int X,
+                                            int Y,
+                                            int cx,
+                                            int cy,
+                                            uint uFlags);
 
     [LibraryImport("user32.dll", EntryPoint = "GetKeyState")]
     public static partial short GetKeyState(int nVirtKey);
+
+    // 使用 StringMarshalling.Utf16 自动处理 C# string 到 wchar_t* 的转换
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 }

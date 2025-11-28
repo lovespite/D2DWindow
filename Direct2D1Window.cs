@@ -1,16 +1,16 @@
 ﻿using SharpDX;
 using SharpDX.Direct2D1;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using static System.Runtime.CompilerServices.RuntimeHelpers;
 
-namespace NativeWindow;
+namespace D2DWindow;
 
 /// <summary>
 /// 一个封装了纯 Win32 API 和 Direct2D 渲染环境的抽象基类。
 /// 实现了高性能消息循环，适合游戏开发。
 /// </summary>
-public abstract class D2DWindow : IDisposable
+public abstract class Direct2D1Window : IDisposable
 {
     private IntPtr _handle;
     private Win32Native.WndProcDelegate? _wndProcDelegate;
@@ -30,9 +30,9 @@ public abstract class D2DWindow : IDisposable
     // 鼠标当前状态（用于逻辑查询）
     public Point MousePosition { get; private set; }
 
-    // 事件系统
+    // HID输入事件系统
 
-    #region Event System
+    #region HID Event System
 
     private readonly RawMouseEventArgs _cachedMouseArgs = new();
     private readonly RawKeyEventArgs _cachedKeyArgs = new();
@@ -100,7 +100,7 @@ public abstract class D2DWindow : IDisposable
     /// rendering target.</remarks>
     public event Action<RenderTarget>? DeviceReady;
 
-    protected D2DWindow(string title, int width, int height)
+    protected Direct2D1Window(string title, int width, int height)
     {
         Title = title;
         Width = width;
@@ -109,6 +109,10 @@ public abstract class D2DWindow : IDisposable
 
         CreateInternal();
         InitializeDirect2D();
+    }
+
+    protected virtual void OnLoad()
+    {
     }
 
     private void CreateInternal()
@@ -125,20 +129,30 @@ public abstract class D2DWindow : IDisposable
         wndClass.lpszClassName = _className;
 
         if (Win32Native.RegisterClassEx(ref wndClass) == 0)
-            throw new Exception("Failed to register window class.");
+        {
+            var error = Marshal.GetLastWin32Error();
+            var exception = new System.ComponentModel.Win32Exception(error);
+            throw exception;
+        }
 
         var rect = new Win32Native.RECT { Left = 0, Top = 0, Right = Width, Bottom = Height };
         Win32Native.AdjustWindowRect(ref rect, Win32Native.WS_OVERLAPPEDWINDOW, false);
 
         _handle = Win32Native.CreateWindowEx(
-            0, _className, Title,
-            Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE,
+            dwExStyle: 0,
+            lpClassName: _className,
+            lpWindowName: Title,
+            dwStyle: Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE,
             Win32Native.CW_USEDEFAULT, Win32Native.CW_USEDEFAULT,
             rect.Right - rect.Left, rect.Bottom - rect.Top,
             IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
         if (_handle == IntPtr.Zero)
-            throw new Exception("Failed to create window.");
+        {
+            var error = Marshal.GetLastWin32Error();
+            var exception = new System.ComponentModel.Win32Exception(error);
+            throw exception;
+        }
     }
 
     private void InitializeDirect2D()
@@ -167,6 +181,8 @@ public abstract class D2DWindow : IDisposable
         Win32Native.ShowWindow(_handle, 1);
         Win32Native.UpdateWindow(_handle);
 
+        OnLoad();
+
         var msg = new Win32Native.MSG();
 
         while (true)
@@ -186,6 +202,29 @@ public abstract class D2DWindow : IDisposable
                 RenderFrame();
             }
         }
+    }
+
+    /// <summary>
+    /// 设置或取消窗口的置顶（TopMost）状态。
+    /// </summary>
+    /// <param name="topmost">如果为 true，窗口将置顶；否则取消置顶。</param>
+    public void SetTopMost(bool topmost)
+    {
+        if (_handle == IntPtr.Zero) return;
+
+        IntPtr hWndInsertAfter = topmost
+            ? Win32Native.HWND_TOPMOST // 置顶
+            : Win32Native.HWND_NOTOPMOST; // 取消置顶
+
+        // 使用 SWP_NOMOVE 和 SWP_NOSIZE 标志来保持窗口当前的位置和大小不变，
+        // 只改变 Z 轴顺序 (Z-order)。
+        const uint flags = Win32Native.SWP_NOMOVE | Win32Native.SWP_NOSIZE;
+
+        Win32Native.SetWindowPos(
+            _handle,
+            hWndInsertAfter,
+            0, 0, 0, 0, // X, Y, cx, cy 在设置 SWP_NOMOVE|SWP_NOSIZE 时被忽略
+            flags);
     }
 
     private void RenderFrame()
@@ -229,6 +268,18 @@ public abstract class D2DWindow : IDisposable
         DeviceReady?.Invoke(target);
     }
 
+    /// <summary>
+    /// Raises the resize event to notify subscribers that the dimensions have changed.
+    /// </summary>
+    /// <remarks>Override this method in a derived class to provide custom handling when the size changes.
+    /// This method invokes the Resize event if any handlers are attached.</remarks>
+    /// <param name="width">The new width, in pixels, after the resize operation. Must be non-negative.</param>
+    /// <param name="height">The new height, in pixels, after the resize operation. Must be non-negative.</param>
+    protected virtual void OnResize(int width, int height)
+    {
+        Resize?.Invoke(width, height);
+    }
+
     #region Window Message Processing
 
     protected virtual IntPtr HandleWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -251,7 +302,7 @@ public abstract class D2DWindow : IDisposable
                     _renderTarget?.Resize(new Size2(w, h));
                     Width = w;
                     Height = h;
-                    Resize?.Invoke(w, h);
+                    OnResize(w, h);
                 }
                 return IntPtr.Zero;
 
@@ -326,7 +377,7 @@ public abstract class D2DWindow : IDisposable
         }
 
         return Win32Native.DefWindowProc(hWnd, msg, wParam, lParam);
-    } 
+    }
 
     // --- 高效数据提取辅助方法 ---
     private KeyModifiers GetCurrentModifiers()

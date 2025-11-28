@@ -1,4 +1,4 @@
-﻿namespace NativeWindow;
+﻿namespace D2DWindow;
 
 public enum MouseButton
 {
@@ -12,6 +12,24 @@ public enum KeyModifiers
     Alt = 1,
     Control = 2,
     Shift = 4
+}
+
+public static class KeyModifiersExtensions
+{
+    public static bool Control(this KeyModifiers modifiers)
+    {
+        return modifiers.HasFlag(KeyModifiers.Control);
+    }
+
+    public static bool Alt(this KeyModifiers modifiers)
+    {
+        return modifiers.HasFlag(KeyModifiers.Alt);
+    }
+
+    public static bool Shift(this KeyModifiers modifiers)
+    {
+        return modifiers.HasFlag(KeyModifiers.Shift);
+    }
 }
 
 /// <summary>
