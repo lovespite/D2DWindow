@@ -31,8 +31,12 @@ public abstract class D2DWindow : IDisposable
     public Point MousePosition { get; private set; }
 
     // 事件系统
+
+    #region Event System
+
     private readonly RawMouseEventArgs _cachedMouseArgs = new();
     private readonly RawKeyEventArgs _cachedKeyArgs = new();
+    private readonly RawKeyPressEventArgs _cachedKeyPressArgs = new();
 
     public event Action<RawMouseEventArgs>? MouseMove;
     public event Action<RawMouseEventArgs>? MouseDown;
@@ -40,6 +44,44 @@ public abstract class D2DWindow : IDisposable
     public event Action<RawMouseEventArgs>? MouseWheel;
     public event Action<RawKeyEventArgs>? KeyDown;
     public event Action<RawKeyEventArgs>? KeyUp;
+    public event Action<RawKeyPressEventArgs>? KeyPress;
+
+    protected virtual void OnMouseDown(Point p, MouseButton button)
+    {
+        MouseDown?.Invoke(_cachedMouseArgs);
+    }
+
+    protected virtual void OnMouseUp(Point p, MouseButton button)
+    {
+        MouseUp?.Invoke(_cachedMouseArgs);
+    }
+
+    protected virtual void OnMouseMove(Point p)
+    {
+        MouseMove?.Invoke(_cachedMouseArgs);
+    }
+
+    protected virtual void OnMouseWheel(int delta)
+    {
+        MouseWheel?.Invoke(_cachedMouseArgs);
+    }
+
+    protected virtual void OnKeyUp(int key, KeyModifiers modifiers)
+    {
+        KeyUp?.Invoke(_cachedKeyArgs);
+    }
+
+    protected virtual void OnKeyDown(int key, KeyModifiers modifiers)
+    {
+        KeyDown?.Invoke(_cachedKeyArgs);
+    }
+
+    protected virtual void OnKeyPress(char keyChar, KeyModifiers modifiers)
+    {
+        KeyPress?.Invoke(_cachedKeyPressArgs);
+    }
+
+    #endregion
 
     // 提供给子类访问 RenderTarget
     protected WindowRenderTarget RenderTarget => _renderTarget ?? throw new InvalidOperationException("RenderTarget is not initialized yet.");
@@ -187,7 +229,6 @@ public abstract class D2DWindow : IDisposable
         DeviceReady?.Invoke(target);
     }
 
-
     #region Window Message Processing
 
     protected virtual IntPtr HandleWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -216,70 +257,101 @@ public abstract class D2DWindow : IDisposable
 
             // --- 输入事件处理 ---
             case Win32Native.WM_MOUSEMOVE:
-                if (MouseMove is not null)
                 {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.None);
-                    MouseMove(_cachedMouseArgs);
+                    UpdateMouseInfo(lParam, wParam, MouseButton.None, out var p);
+                    OnMouseMove(p);
+                    return IntPtr.Zero;
                 }
-                return IntPtr.Zero;
 
             case Win32Native.WM_LBUTTONDOWN:
-                if (MouseDown is not null) { UpdateMouseInfo(lParam, wParam, MouseButton.Left); MouseDown(_cachedMouseArgs); }
-                return IntPtr.Zero;
+                {
+                    UpdateMouseInfo(lParam, wParam, MouseButton.Left, out var p);
+                    OnMouseDown(p, MouseButton.Left);
+                    return IntPtr.Zero;
+                }
 
             case Win32Native.WM_LBUTTONUP:
-                if (MouseUp is not null) { UpdateMouseInfo(lParam, wParam, MouseButton.Left); MouseUp(_cachedMouseArgs); }
-                return IntPtr.Zero;
+                {
+                    UpdateMouseInfo(lParam, wParam, MouseButton.Left, out var p);
+                    OnMouseUp(p, MouseButton.Left);
+                    return IntPtr.Zero;
+                }
 
             case Win32Native.WM_RBUTTONDOWN:
-                if (MouseDown is not null) { UpdateMouseInfo(lParam, wParam, MouseButton.Right); MouseDown(_cachedMouseArgs); }
-                return IntPtr.Zero;
+                {
+                    UpdateMouseInfo(lParam, wParam, MouseButton.Right, out var p);
+                    OnMouseDown(p, MouseButton.Right);
+                    return IntPtr.Zero;
+                }
 
             case Win32Native.WM_RBUTTONUP:
-                if (MouseUp is not null) { UpdateMouseInfo(lParam, wParam, MouseButton.Right); MouseUp(_cachedMouseArgs); }
-                return IntPtr.Zero;
+                {
+                    UpdateMouseInfo(lParam, wParam, MouseButton.Right, out var p);
+                    OnMouseUp(p, MouseButton.Right);
+                    return IntPtr.Zero;
+                }
 
             case Win32Native.WM_MOUSEWHEEL:
                 if (MouseWheel is not null)
                 {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.None);
+                    UpdateMouseInfo(lParam, wParam, MouseButton.None, out _);
                     // 滚轮 Delta 在 wParam 的高位
-                    _cachedMouseArgs.WheelDelta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-                    MouseWheel(_cachedMouseArgs);
+                    var wheelData = _cachedMouseArgs.WheelDelta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                    OnMouseWheel(wheelData);
                     _cachedMouseArgs.WheelDelta = 0; // Reset
                 }
                 return IntPtr.Zero;
 
             case Win32Native.WM_KEYDOWN:
-                if (KeyDown is not null)
                 {
-                    UpdateKeyInfo(wParam, true);
-                    KeyDown(_cachedKeyArgs);
+                    UpdateKeyInfo(wParam, true, out var key, out var modifiers);
+                    OnKeyDown(key, modifiers);
+                    return IntPtr.Zero;
                 }
-                return IntPtr.Zero;
 
             case Win32Native.WM_KEYUP:
-                if (KeyUp is not null)
                 {
-                    UpdateKeyInfo(wParam, false);
-                    KeyUp(_cachedKeyArgs);
+                    UpdateKeyInfo(wParam, false, out var key, out var modifiers);
+                    OnKeyUp(key, modifiers);
+                    return IntPtr.Zero;
+                }
+
+            case Win32Native.WM_CHAR:
+                if (KeyPress is not null)
+                {
+                    UpdateKeyPressInfo(wParam, out var c, out var modifiers);
+                    OnKeyPress(c, modifiers);
                 }
                 return IntPtr.Zero;
         }
 
         return Win32Native.DefWindowProc(hWnd, msg, wParam, lParam);
-    }
+    } 
 
     // --- 高效数据提取辅助方法 ---
+    private KeyModifiers GetCurrentModifiers()
+    {
+        KeyModifiers modifiers = KeyModifiers.None;
 
-    private void UpdateMouseInfo(IntPtr lParam, IntPtr wParam, MouseButton button)
+        // 检查高位是否为1 (0x8000)，表示当前键被按下
+        if ((Win32Native.GetKeyState(Win32Native.VK_MENU) & 0x8000) != 0)
+            modifiers |= KeyModifiers.Alt;
+        if ((Win32Native.GetKeyState(Win32Native.VK_CONTROL) & 0x8000) != 0)
+            modifiers |= KeyModifiers.Control;
+        if ((Win32Native.GetKeyState(Win32Native.VK_SHIFT) & 0x8000) != 0)
+            modifiers |= KeyModifiers.Shift;
+
+        return modifiers;
+    }
+
+    private void UpdateMouseInfo(IntPtr lParam, IntPtr wParam, MouseButton button, out Point p)
     {
         // 提取低位和高位作为 X, Y (比 Marshal 效率高)
         long l = lParam.ToInt64();
         int x = (short)(l & 0xFFFF);
         int y = (short)((l >> 16) & 0xFFFF);
 
-        MousePosition = new Point(x, y);
+        MousePosition = p = new Point(x, y);
 
         _cachedMouseArgs.X = x;
         _cachedMouseArgs.Y = y;
@@ -288,11 +360,22 @@ public abstract class D2DWindow : IDisposable
         _cachedMouseArgs.Handled = false;
     }
 
-    private void UpdateKeyInfo(IntPtr wParam, bool isDown)
+    private void UpdateKeyInfo(IntPtr wParam, bool isDown, out int key, out KeyModifiers modifiers)
     {
-        _cachedKeyArgs.Key = wParam.ToInt32(); // 虚拟键码直接映射
+        key = wParam.ToInt32();
+        modifiers = GetCurrentModifiers();
+        _cachedKeyArgs.Key = key; // 虚拟键码直接映射
+        _cachedKeyArgs.Modifiers = modifiers;
         _cachedKeyArgs.IsDown = isDown;
         _cachedKeyArgs.Handled = false;
+    }
+
+    private void UpdateKeyPressInfo(IntPtr wParam, out char c, out KeyModifiers modifiers)
+    {
+        modifiers = GetCurrentModifiers();
+        _cachedKeyPressArgs.KeyChar = c = (char)wParam.ToInt64();
+        _cachedKeyPressArgs.Modifiers = modifiers;
+        _cachedKeyPressArgs.Handled = false;
     }
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)

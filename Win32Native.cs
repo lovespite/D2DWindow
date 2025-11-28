@@ -11,6 +11,10 @@ internal static partial class Win32Native
     public const int CS_HREDRAW = 0x0002;
     public const int CS_VREDRAW = 0x0001;
     public const int CS_OWNDC = 0x0020;
+     
+    public const int VK_SHIFT = 0x10;
+    public const int VK_CONTROL = 0x11;
+    public const int VK_MENU = 0x12; // Alt
 
     public const uint WM_KEYDOWN = 0x0100;
     public const uint WM_KEYUP = 0x0101;
@@ -158,4 +162,7 @@ internal static partial class Win32Native
 
     [LibraryImport("user32.dll", EntryPoint = "DestroyWindowW", SetLastError = true)]
     public static partial void DestroyWindow(IntPtr hWnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetKeyState")]
+    public static partial short GetKeyState(int nVirtKey);
 }
