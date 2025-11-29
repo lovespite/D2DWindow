@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using System.Text;
 
 namespace D2DWindow;
 
@@ -36,6 +37,7 @@ internal static partial class Win32Native
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_FRAMECHANGED = 0x0020;
     public const uint SWP_SHOWWINDOW = 0x0040;
 
     public const uint WM_KEYDOWN = 0x0100;
@@ -50,15 +52,30 @@ internal static partial class Win32Native
     public const uint WM_MBUTTONDOWN = 0x0207;
     public const uint WM_MBUTTONUP = 0x0208;
     public const uint WM_MOUSEWHEEL = 0x020A;
+    // --- Window Style Constants (WS_) ---
+    public const uint WS_OVERLAPPED = 0x00000000;
+    public const uint WS_POPUP = 0x80000000;
+    public const uint WS_VISIBLE = 0x10000000;
+    public const uint WS_CAPTION = 0x00C00000;
+    public const uint WS_SYSMENU = 0x00080000;
+    public const uint WS_THICKFRAME = 0x00040000; // Sizable
+    public const uint WS_MINIMIZEBOX = 0x00020000;
+    public const uint WS_MAXIMIZEBOX = 0x00010000;
+    public const uint WS_OVERLAPPEDWINDOW = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
-    public const int WS_OVERLAPPED = 0x00000000;
-    public const int WS_CAPTION = 0x00C00000;
-    public const int WS_SYSMENU = 0x00080000;
-    public const int WS_THICKFRAME = 0x00040000;
-    public const int WS_MINIMIZEBOX = 0x00020000;
-    public const int WS_MAXIMIZEBOX = 0x00010000;
-    public const int WS_OVERLAPPEDWINDOW = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
-    public const int WS_VISIBLE = 0x10000000;
+    // --- GetWindowLong Indices ---
+    public const int GWL_STYLE = -16;
+
+    // --- ShowWindow Commands (SW_) ---
+    public const int SW_HIDE = 0;
+    public const int SW_SHOWNORMAL = 1;
+    public const int SW_SHOWMINIMIZED = 2;
+    public const int SW_SHOWMAXIMIZED = 3;
+    public const int SW_RESTORE = 9;
+
+    // --- System Metrics ---
+    public const int SM_CXSCREEN = 0;
+    public const int SM_CYSCREEN = 1;
 
     public const int CW_USEDEFAULT = unchecked((int)0x80000000);
 
@@ -71,6 +88,28 @@ internal static partial class Win32Native
 
     public const int IDC_ARROW = 32512;
     public const int PM_REMOVE = 0x0001;
+
+    // --- File Dialog Flags (OFN_) ---
+    public const int OFN_READONLY = 0x00000001;
+    public const int OFN_OVERWRITEPROMPT = 0x00000002;
+    public const int OFN_HIDEREADONLY = 0x00000004;
+    public const int OFN_NOCHANGEDIR = 0x00000008;
+    public const int OFN_ALLOWMULTISELECT = 0x00000200;
+    public const int OFN_PATHMUSTEXIST = 0x00000800;
+    public const int OFN_FILEMUSTEXIST = 0x00001000;
+    public const int OFN_CREATEPROMPT = 0x00002000;
+    public const int OFN_SHAREAWARE = 0x00004000;
+    public const int OFN_NOREADONLYRETURN = 0x00008000;
+    public const int OFN_NOTESTFILECREATE = 0x00010000;
+    public const int OFN_NONETWORKBUTTON = 0x00020000;
+    public const int OFN_NOLONGNAMES = 0x00040000;
+    public const int OFN_EXPLORER = 0x00080000;
+    public const int OFN_NODEREFERENCELINKS = 0x00100000;
+    public const int OFN_LONGNAMES = 0x00200000;
+    public const int OFN_ENABLEINCLUDENOTIFY = 0x00400000;
+    public const int OFN_ENABLESIZING = 0x00800000;
+    public const int OFN_DONTADDTORECENT = 0x02000000;
+    public const int OFN_FORCESHOWHIDDEN = 0x10000000;
 
     // --- 委托 ---
 
@@ -124,6 +163,34 @@ internal static partial class Win32Native
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct OPENFILENAME
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hInstance;
+        public string lpstrFilter;
+        public string lpstrCustomFilter;
+        public int nMaxCustFilter;
+        public int nFilterIndex;
+        public IntPtr lpstrFile; // 使用 IntPtr 手动管理缓冲区，避免内嵌 StringBuilder 问题
+        public int nMaxFile;
+        public string lpstrFileTitle;
+        public int nMaxFileTitle;
+        public string lpstrInitialDir;
+        public string lpstrTitle;
+        public int Flags;
+        public short nFileOffset;
+        public short nFileExtension;
+        public string lpstrDefExt;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public string lpTemplateName;
+        public IntPtr pvReserved;
+        public int dwReserved;
+        public int FlagsEx;
+    }
+
     // --- API 导入 ---
     [DllImport("user32.dll", EntryPoint = "RegisterClassExW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
@@ -137,7 +204,7 @@ internal static partial class Win32Native
                                                 int dwExStyle,
                                                 string lpClassName,
                                                 string lpWindowName,
-                                                int dwStyle,
+                                                uint dwStyle,
                                                 int x,
                                                 int y,
                                                 int nWidth,
@@ -181,7 +248,7 @@ internal static partial class Win32Native
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool AdjustWindowRect(ref RECT lpRect, int dwStyle, [MarshalAs(UnmanagedType.Bool)] bool bMenu);
+    public static partial bool AdjustWindowRect(ref RECT lpRect, uint dwStyle, [MarshalAs(UnmanagedType.Bool)] bool bMenu);
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr GetModuleHandle(string? lpModuleName);
@@ -206,4 +273,64 @@ internal static partial class Win32Native
     // 使用 StringMarshalling.Utf16 自动处理 C# string 到 wchar_t* 的转换
     [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    // --- Common Dialog API ---
+    [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool GetOpenFileName([In, Out] ref OPENFILENAME ofn);
+
+    [DllImport("comdlg32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool GetSaveFileName([In, Out] ref OPENFILENAME ofn);
+
+    // --- Window Style / State APIs ---
+
+    // 针对 32 位的 GetWindowLong
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    // 针对 64 位的 GetWindowLongPtr
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    // 智能包装器
+    public static IntPtr GetWindowLong(IntPtr hWnd, int nIndex)
+    {
+        if (IntPtr.Size == 8) return GetWindowLongPtr64(hWnd, nIndex);
+        return (IntPtr)GetWindowLong32(hWnd, nIndex);
+    }
+
+    // 针对 32 位的 SetWindowLong
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    // 针对 64 位的 SetWindowLongPtr
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    // 智能包装器
+    public static IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong)
+    {
+        if (IntPtr.Size == 8) return SetWindowLongPtr64(hWnd, nIndex, dwNewLong);
+        return (IntPtr)SetWindowLong32(hWnd, nIndex, dwNewLong.ToInt32());
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsZoomed(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsIconic(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    public static partial int GetSystemMetrics(int nIndex);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowTextW", CharSet = CharSet.Unicode)]
+    internal static extern void SetWindowText(nint handle, string title);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
+    internal static unsafe partial int GetWindowTextPtr(nint handle, char* title, int maxCount);
 }
