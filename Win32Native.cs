@@ -56,6 +56,7 @@ internal static partial class Win32Native
     public const uint WS_OVERLAPPED = 0x00000000;
     public const uint WS_POPUP = 0x80000000;
     public const uint WS_VISIBLE = 0x10000000;
+    public const uint WS_INVISIBLE = 0x08000000;
     public const uint WS_CAPTION = 0x00C00000;
     public const uint WS_SYSMENU = 0x00080000;
     public const uint WS_THICKFRAME = 0x00040000; // Sizable
@@ -333,4 +334,12 @@ internal static partial class Win32Native
 
     [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
     internal static unsafe partial int GetWindowTextPtr(nint handle, char* title, int maxCount);
+
+    [LibraryImport("user32.dll", EntryPoint = "PostMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool PostMessage(nint handle, int msg, nint lParam, nint wParam);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool IsWindowVisible(nint handle);
 }

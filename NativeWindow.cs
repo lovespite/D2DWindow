@@ -1,95 +1,22 @@
-﻿using SharpDX;
-using SharpDX.Direct2D1;
-using SharpDX.Mathematics.Interop;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace D2DWindow;
 
-/// <summary>
-/// 一个封装了纯 Win32 API 和 Direct2D 渲染环境的抽象基类。
-/// 实现了高性能消息循环，适合游戏开发。
-/// </summary>
-public abstract class Direct2D1Window : IDisposable, IWin32Owner
+public abstract class NativeWindow : IWin32Owner, IDisposable
 {
-    private readonly Stopwatch _sw = new();
-    private readonly Stopwatch _fpsTimer = new();
-    private nint _handle;
-    private Size _sz;
-    private long _lastFrameTicks = 0;
-    private int _fps;
-    private int _frameCount = 0;
-    private Win32Native.WndProcDelegate? _wndProcDelegate;
     public abstract string WindowClassName { get; }
-    private bool _isDeviceReady;
-    private RawColor4 _backgroundColor = new(0, 0, 0, 1); // 默认黑色背景
+
+    private bool _visible = true;
+    private nint _handle;
+    private Size _sz = new(100, 100);
+    private Win32Native.WndProcDelegate? _wndProcDelegate;
 
     // 全屏/窗口状态存储
     private bool _isFullScreen = false;
     private Win32Native.RECT _savedWindowRect;
     private uint _savedWindowStyle;
-
-    // Direct2D 资源
-    private Factory1? _factory;
-    private WindowRenderTarget? _renderTarget;
-
-    // HID输入事件系统
-    #region HID Event System
-
-    private readonly RawMouseEventArgs _cachedMouseArgs = new();
-    private readonly RawKeyEventArgs _cachedKeyArgs = new();
-    private readonly RawKeyPressEventArgs _cachedKeyPressArgs = new();
-
-    public event Action<RawMouseEventArgs>? MouseMove;
-    public event Action<RawMouseEventArgs>? MouseDown;
-    public event Action<RawMouseEventArgs>? MouseUp;
-    public event Action<RawMouseEventArgs>? MouseWheel;
-    public event Action<RawKeyEventArgs>? KeyDown;
-    public event Action<RawKeyEventArgs>? KeyUp;
-    public event Action<RawKeyPressEventArgs>? KeyPress;
-
-    protected virtual void OnMouseDown(Point p, MouseButton button)
-    {
-        MouseDown?.Invoke(_cachedMouseArgs);
-    }
-
-    protected virtual void OnMouseUp(Point p, MouseButton button)
-    {
-        MouseUp?.Invoke(_cachedMouseArgs);
-    }
-
-    protected virtual void OnMouseMove(Point p)
-    {
-        MouseMove?.Invoke(_cachedMouseArgs);
-    }
-
-    protected virtual void OnMouseWheel(int delta)
-    {
-        MouseWheel?.Invoke(_cachedMouseArgs);
-    }
-
-    protected virtual void OnKeyUp(int key, KeyModifiers modifiers)
-    {
-        KeyUp?.Invoke(_cachedKeyArgs);
-    }
-
-    protected virtual void OnKeyDown(int key, KeyModifiers modifiers)
-    {
-        KeyDown?.Invoke(_cachedKeyArgs);
-    }
-
-    protected virtual void OnKeyPress(char keyChar, KeyModifiers modifiers)
-    {
-        KeyPress?.Invoke(_cachedKeyPressArgs);
-    }
-
-    #endregion
-
-    // 提供给子类访问 RenderTarget
-    protected WindowRenderTarget RenderTarget => _renderTarget ?? throw new InvalidOperationException("RenderTarget is not initialized yet.");
-    protected Factory1 Factory => _factory ?? throw new InvalidOperationException("Factory is not initialized yet.");
 
     #region Events
 
@@ -98,27 +25,17 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     /// </summary>
     public event Action<int, int>? Resize;
 
-    /// <summary>
-    /// Occurs when the rendering device has been initialized and is ready for use.
-    /// </summary>
-    /// <remarks>Subscribers can use this event to perform setup or resource allocation that depends on the
-    /// device being available. The event provides a <see cref="RenderTarget"/> instance representing the active
-    /// rendering target.</remarks>
-    public event Action<RenderTarget>? DeviceReady;
-
     #endregion
 
-    protected Direct2D1Window(string title, int width, int height)
+    protected NativeWindow(bool visible = true)
     {
-        _sz = new Size(width, height);
-        CreateInternal();
-        InitializeDirect2D();
-        SetTitle(title);
+        _visible = visible;
+        CreateWindowInstanceInternal();
     }
 
     #region Core Initialization
 
-    private void CreateInternal()
+    private void CreateWindowInstanceInternal()
     {
         nint hInstance = Win32Native.GetModuleHandle(null);
         _wndProcDelegate = new Win32Native.WndProcDelegate(WndProc);
@@ -130,12 +47,12 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
             lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
             hInstance = hInstance,
             hCursor = Win32Native.LoadCursor(IntPtr.Zero, Win32Native.IDC_ARROW),
-            lpszClassName = WindowClassName
+            lpszClassName = WindowClassName,
         };
 
         if (Win32Native.RegisterClassEx(ref wndClass) == 0)
         {
-            var error = Marshal.GetLastWin32Error();
+            var error = Marshal.GetLastSystemError();
             var exception = new System.ComponentModel.Win32Exception(error);
             throw exception;
         }
@@ -143,70 +60,48 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         var rect = new Win32Native.RECT { Left = 0, Top = 0, Right = _sz.Width, Bottom = _sz.Height };
         Win32Native.AdjustWindowRect(ref rect, Win32Native.WS_OVERLAPPEDWINDOW, false);
 
+        uint dwStyle = _visible ? (Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE) :
+            Win32Native.WS_OVERLAPPEDWINDOW;
+
         _handle = Win32Native.CreateWindowEx(
             dwExStyle: 0,
-            lpClassName: wndClass.lpszClassName,
-            lpWindowName: Title,
-            dwStyle: Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE,
-            Win32Native.CW_USEDEFAULT, Win32Native.CW_USEDEFAULT,
-            rect.Right - rect.Left, rect.Bottom - rect.Top,
-            IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
+            lpClassName: wndClass.lpszClassName, lpWindowName: string.Empty,
+            dwStyle,
+            x: Win32Native.CW_USEDEFAULT, y: Win32Native.CW_USEDEFAULT,
+            nWidth: rect.Right - rect.Left, nHeight: rect.Bottom - rect.Top,
+            hWndParent: 0, hMenu: 0, hInstance, lpParam: 0);
 
-        if (_handle == IntPtr.Zero)
+        if (_handle == 0)
         {
-            var error = Marshal.GetLastWin32Error();
+            var error = Marshal.GetLastSystemError();
             var exception = new System.ComponentModel.Win32Exception(error);
             throw exception;
         }
     }
 
-    private void InitializeDirect2D()
-    {
-        _factory = new Factory1();
-
-        var pixelFormat = new PixelFormat(SharpDX.DXGI.Format.B8G8R8A8_UNorm, AlphaMode.Premultiplied);
-        var renderTargetProperties = new RenderTargetProperties(RenderTargetType.Default, pixelFormat, 96, 96, RenderTargetUsage.None, FeatureLevel.Level_DEFAULT);
-        var hwndRenderTargetProperties = new HwndRenderTargetProperties
-        {
-            Hwnd = _handle,
-            PixelSize = new Size2(Width, Height),
-            PresentOptions = PresentOptions.None, // 垂直同步可在这里控制 
-        };
-
-        _renderTarget = new WindowRenderTarget(_factory, renderTargetProperties, hwndRenderTargetProperties)
-        {
-            AntialiasMode = AntialiasMode.PerPrimitive
-        };
-        _isDeviceReady = true;
-        OnDeviceReady(_renderTarget);
-    }
-
     #endregion
 
-    #region Main Message Loop & Rendering
+    #region Main Message Loop
 
     /// <summary>
     /// 启动高性能消息循环。
     /// </summary>
     public void Run()
     {
-        Win32Native.ShowWindow(_handle, 1);
+        Win32Native.ShowWindow(_handle, _visible ? Win32Native.SW_SHOWNORMAL : Win32Native.SW_HIDE);
         Win32Native.UpdateWindow(_handle);
 
         OnLoad();
 
-        _sw.Start();
-        _fpsTimer.Start();
-        _lastFrameTicks = _sw.ElapsedTicks;
         var msg = new Win32Native.MSG();
 
         try
         {
             while (true)
             {
-                // 使用 PeekMessage 检查消息
-                if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
+                if (Win32Native.GetMessage(out msg, IntPtr.Zero, 0, 0))
                 {
+                    Debug.WriteLine("Message: " + msg.message);
                     if (msg.message == Win32Native.WM_QUIT)
                         break;
 
@@ -215,49 +110,16 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
                 }
                 else
                 {
-                    // 空闲时进行渲染
-                    RenderFrame();
+                    Debug.WriteLine("Idle");
+                    // OnIdle();
                 }
             }
-
+            Debug.WriteLine("Message loop exited.");
         }
         finally
         {
             Dispose();
         }
-    }
-
-    private void RenderFrame()
-    {
-        if (_renderTarget is null) return;
-
-        long currentTicks = _sw.ElapsedTicks;
-        float deltaTimeInSeconds = (currentTicks - _lastFrameTicks) / (float)Stopwatch.Frequency;
-        _lastFrameTicks = currentTicks;
-
-        _renderTarget.BeginDraw();
-        _renderTarget.Clear(_backgroundColor);
-
-        OnPaint(_renderTarget, deltaTimeInSeconds);
-
-        try
-        {
-            _renderTarget.EndDraw();
-        }
-        catch (SharpDXException ex) when ((uint)ex.ResultCode.Code == 0x8899000C) // D2DERR_RECREATE_TARGET
-        {
-            // 设备丢失，需要重建资源 (这里简化处理，仅仅为了防止崩溃)
-            // 实际上应该 Dispose RenderTarget 并重新 InitializeDirect2D
-            _renderTarget.Dispose();
-            _renderTarget = null;
-            InitializeDirect2D();
-        }
-
-        ++_frameCount;
-        if (_fpsTimer.ElapsedMilliseconds < 1000) return;
-        _fps = _frameCount / (int)(_fpsTimer.ElapsedMilliseconds / 1000);
-        _frameCount = 0;
-        _fpsTimer.Restart();
     }
 
     #endregion
@@ -272,23 +134,16 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     /// object; ensure the object is not disposed before using the handle.</remarks>
     public nint Handle => _handle;
 
-    /// <summary>
-    /// Gets the current frames per second (FPS) value.
-    /// </summary>
-    public int FPS => _fps;
-
-    /// <summary>
-    /// 获取一个值，指示 Direct2D 渲染设备是否已就绪。
-    /// </summary>
-    public bool IsDeviceReady => _isDeviceReady;
-
-    /// <summary>
-    /// 获取或设置窗口背景颜色。
-    /// </summary>
-    public RawColor4 BackgroundColor
+    public bool Visible
     {
-        get => _backgroundColor;
-        set => _backgroundColor = value;
+        get => IsVisible();
+        set
+        {
+            if (value)
+                Show();
+            else
+                Hide();
+        }
     }
 
     /// <summary>
@@ -387,7 +242,11 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
 
     public void Close()
     {
-        Win32Native.PostMessage(_handle, Win32Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        var ok = Win32Native.PostMessage(_handle, Win32Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        if (!ok)
+        {
+            Debug.WriteLine("NativeWindow Close: return false");
+        }
     }
 
     /// <summary>
@@ -483,6 +342,24 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         if (_handle == IntPtr.Zero) return Size.Empty;
         Win32Native.GetWindowRect(_handle, out Win32Native.RECT rect);
         return _sz = new Size(rect.Right - rect.Left, rect.Bottom - rect.Top);
+    }
+
+    public void Hide()
+    {
+        _visible = false;
+        Win32Native.ShowWindow(_handle, Win32Native.SW_HIDE);
+    }
+
+    public void Show()
+    {
+        _visible = true;
+        Win32Native.ShowWindow(_handle, Win32Native.SW_SHOWNORMAL);
+    }
+
+    public bool IsVisible()
+    {
+        if (_handle == IntPtr.Zero) return false;
+        return _visible = Win32Native.IsWindowVisible(_handle);
     }
 
     public void SetLocation(int x, int y)
@@ -650,7 +527,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
 
     #endregion
 
-    #region 
+    #region Style Helpers
 
     private bool HasStyle(uint styleToCheck)
     {
@@ -674,24 +551,8 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #endregion
 
     #region Virtual Methods
-    /// <summary>
-    /// 子类必须实现的绘制方法。
-    /// 每一帧都会被调用。
-    /// </summary>
-    protected abstract void OnPaint(RenderTarget target, float deltaTimeInSeconds);
 
-    /// <summary>
-    /// Raises the device ready event to signal that the specified render target is prepared for use.
-    /// </summary>
-    /// <remarks>Derived classes can override this method to perform additional actions when a render target
-    /// becomes ready. This method invokes the DeviceReady event if it is subscribed.</remarks>
-    /// <param name="target">The render target that has become ready. This parameter provides context about the device or resource that is
-    /// now available.</param>
-    protected virtual void OnDeviceReady(RenderTarget target)
-    {
-        // 子类可以重写以响应设备就绪事件
-        DeviceReady?.Invoke(target);
-    }
+    protected virtual void OnIdle() { }
 
     /// <summary>
     /// Raises the resize event to notify subscribers that the dimensions have changed.
@@ -712,149 +573,35 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #endregion
 
     #region Window Message Processing 
-    protected virtual IntPtr HandleWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+
+    protected virtual nint HandleWndProc(nint hWnd, uint msg, nint wParam, IntPtr lParam)
     {
         switch (msg)
         {
             case Win32Native.WM_DESTROY:
-                Win32Native.PostQuitMessage(0);
-                Win32Native.DestroyWindow(_handle);
-                return IntPtr.Zero;
+                {
+                    Win32Native.PostQuitMessage(0);
+                    Win32Native.DestroyWindow(_handle);
+                    return nint.Zero;
+                }
 
             case Win32Native.WM_ERASEBKGND:
-                return (IntPtr)1;
+                {
+                    return (nint)1;
+                }
 
             case Win32Native.WM_SIZE:
-                int w = (int)(lParam.ToInt64() & 0xFFFF);
-                int h = (int)((lParam.ToInt64() >> 16) & 0xFFFF);
-                // 最小化时 w/h 可能为 0，需处理
-                if (w > 0 && h > 0)
                 {
-                    _renderTarget?.Resize(new Size2(w, h));
+                    int w = (int)(lParam.ToInt64() & 0xFFFF);
+                    int h = (int)((lParam.ToInt64() >> 16) & 0xFFFF);
                     _sz.Width = w;
                     _sz.Height = h;
                     OnResize(w, h);
+                    return nint.Zero;
                 }
-                return IntPtr.Zero;
-
-            // --- 输入事件处理 ---
-            case Win32Native.WM_MOUSEMOVE:
-                {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.None, out var p);
-                    OnMouseMove(p);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_LBUTTONDOWN:
-                {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.Left, out var p);
-                    OnMouseDown(p, MouseButton.Left);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_LBUTTONUP:
-                {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.Left, out var p);
-                    OnMouseUp(p, MouseButton.Left);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_RBUTTONDOWN:
-                {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.Right, out var p);
-                    OnMouseDown(p, MouseButton.Right);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_RBUTTONUP:
-                {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.Right, out var p);
-                    OnMouseUp(p, MouseButton.Right);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_MOUSEWHEEL:
-                {
-                    // 滚轮 Delta 在 wParam 的高位
-                    var wheelData = _cachedMouseArgs.WheelDelta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-                    OnMouseWheel(wheelData);
-                    _cachedMouseArgs.WheelDelta = 0; // Reset
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_KEYDOWN:
-                {
-                    UpdateKeyInfo(wParam, true, out var key, out var modifiers);
-                    OnKeyDown(key, modifiers);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_KEYUP:
-                {
-                    UpdateKeyInfo(wParam, false, out var key, out var modifiers);
-                    OnKeyUp(key, modifiers);
-                    return IntPtr.Zero;
-                }
-
-            case Win32Native.WM_CHAR:
-                {
-                    UpdateKeyPressInfo(wParam, out var c, out var modifiers);
-                    OnKeyPress(c, modifiers);
-                }
-                return IntPtr.Zero;
         }
 
         return Win32Native.DefWindowProc(hWnd, msg, wParam, lParam);
-    }
-
-    // --- 高效数据提取辅助方法 ---
-    private KeyModifiers GetCurrentModifiers()
-    {
-        KeyModifiers modifiers = KeyModifiers.None;
-
-        // 检查高位是否为1 (0x8000)，表示当前键被按下
-        if ((Win32Native.GetKeyState(Win32Native.VK_MENU) & 0x8000) != 0)
-            modifiers |= KeyModifiers.Alt;
-        if ((Win32Native.GetKeyState(Win32Native.VK_CONTROL) & 0x8000) != 0)
-            modifiers |= KeyModifiers.Control;
-        if ((Win32Native.GetKeyState(Win32Native.VK_SHIFT) & 0x8000) != 0)
-            modifiers |= KeyModifiers.Shift;
-
-        return modifiers;
-    }
-
-    private void UpdateMouseInfo(IntPtr lParam, IntPtr wParam, MouseButton button, out Point p)
-    {
-        // 提取低位和高位作为 X, Y (比 Marshal 效率高)
-        long l = lParam.ToInt64();
-        int x = (short)(l & 0xFFFF);
-        int y = (short)((l >> 16) & 0xFFFF);
-
-        MousePosition = p = new Point(x, y);
-
-        _cachedMouseArgs.X = x;
-        _cachedMouseArgs.Y = y;
-        _cachedMouseArgs.Button = button;
-        _cachedMouseArgs.WheelDelta = 0;
-        _cachedMouseArgs.Handled = false;
-    }
-
-    private void UpdateKeyInfo(IntPtr wParam, bool isDown, out int key, out KeyModifiers modifiers)
-    {
-        key = wParam.ToInt32();
-        modifiers = GetCurrentModifiers();
-        _cachedKeyArgs.Key = key; // 虚拟键码直接映射
-        _cachedKeyArgs.Modifiers = modifiers;
-        _cachedKeyArgs.IsDown = isDown;
-        _cachedKeyArgs.Handled = false;
-    }
-
-    private void UpdateKeyPressInfo(IntPtr wParam, out char c, out KeyModifiers modifiers)
-    {
-        modifiers = GetCurrentModifiers();
-        _cachedKeyPressArgs.KeyChar = c = (char)wParam.ToInt64();
-        _cachedKeyPressArgs.Modifiers = modifiers;
-        _cachedKeyPressArgs.Handled = false;
     }
 
     private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -865,11 +612,10 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #endregion
 
     #region IDisposable Support
+
     public virtual void Dispose()
     {
-        _renderTarget?.Dispose();
-        _factory?.Dispose();
-
+        Debug.WriteLine("Disposing...");
         if (_handle != IntPtr.Zero)
         {
             // 1. 尝试销毁窗口
