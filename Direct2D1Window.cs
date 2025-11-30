@@ -349,7 +349,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     /// 鼠标当前状态（用于逻辑查询）
     /// </summary>
     public Point MousePosition { get; private set; }
-    
+
     /// <summary>
     /// 获取或设置窗口位置。
     /// </summary>
@@ -358,7 +358,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         get => GetLocation();
         set => SetLocation(value.X, value.Y);
     }
-    
+
     /// <summary>
     /// 获取或设置窗口边界。
     /// </summary>
@@ -774,15 +774,13 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
                 }
 
             case Win32Native.WM_MOUSEWHEEL:
-                if (MouseWheel is not null)
                 {
-                    UpdateMouseInfo(lParam, wParam, MouseButton.None, out _);
                     // 滚轮 Delta 在 wParam 的高位
                     var wheelData = _cachedMouseArgs.WheelDelta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
                     OnMouseWheel(wheelData);
                     _cachedMouseArgs.WheelDelta = 0; // Reset
+                    return IntPtr.Zero;
                 }
-                return IntPtr.Zero;
 
             case Win32Native.WM_KEYDOWN:
                 {
@@ -839,6 +837,8 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         _cachedMouseArgs.Button = button;
         _cachedMouseArgs.WheelDelta = 0;
         _cachedMouseArgs.Handled = false;
+
+        Debug.WriteLine(p);
     }
 
     private void UpdateKeyInfo(IntPtr wParam, bool isDown, out int key, out KeyModifiers modifiers)
