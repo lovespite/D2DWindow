@@ -1,6 +1,7 @@
 ﻿using SharpDX;
 using SharpDX.Direct2D1;
 using SharpDX.Mathematics.Interop;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -16,6 +17,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
 {
     private readonly Stopwatch _sw = new();
     private readonly Stopwatch _fpsTimer = new();
+    private readonly BlockingCollection<Action> _pendingActions = new(new ConcurrentQueue<Action>());
     private nint _handle;
     private Size _sz;
     private long _lastFrameTicks = 0;
@@ -186,45 +188,77 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #region Main Message Loop & Rendering
 
     /// <summary>
+    /// 帧时间，单位毫秒。
+    /// 默认帧率 60 FPS -> 约 16.67 ms
+    /// </summary>
+    public double TargetFrameTime { get; set; } = 1000d / 60;
+
+    /// <summary>
     /// 启动高性能消息循环。
     /// </summary>
     public void Run()
     {
         Win32Native.ShowWindow(_handle, 1);
         Win32Native.UpdateWindow(_handle);
-
         OnLoad();
 
         _sw.Start();
-        _fpsTimer.Start();
-        _lastFrameTicks = _sw.ElapsedTicks;
         var msg = new Win32Native.MSG();
 
         try
         {
             while (true)
             {
-                // 使用 PeekMessage 检查消息
                 if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
                 {
-                    if (msg.message == Win32Native.WM_QUIT)
-                        break;
-
+                    if (msg.message == Win32Native.WM_QUIT) break;
                     Win32Native.TranslateMessage(ref msg);
                     Win32Native.DispatchMessage(ref msg);
                 }
                 else
                 {
-                    // 空闲时进行渲染
+                    long frameStartTicks = _sw.ElapsedTicks;
+
+                    // 渲染
                     RenderFrame();
+                    if (_pendingActions.Count == 0) continue;
+                    // 处理任务 (尽可能多做，直到达到某个安全阈值)
+                    // 这里我们计算一下渲染用了多久
+                    double renderTimeMs = (_sw.ElapsedTicks - frameStartTicks) * 1000.0 / Stopwatch.Frequency;
+
+                    // 给任务留点时间，比如利用剩下的时间，但不要把时间全用光，留一点缓冲
+                    double timeForActions = TargetFrameTime - renderTimeMs;
+                    ProcessPendingActions(timeForActions);
                 }
             }
-
         }
         finally
         {
             Dispose();
         }
+    }
+
+    private void ProcessPendingActions(double timeBudgetMs)
+    {
+        if (timeBudgetMs <= 0) return;
+
+        long startTimestamp = Stopwatch.GetTimestamp();
+        long budgetTicks = (long)(timeBudgetMs * Stopwatch.Frequency / 1000);
+
+        // 关键点：TryTake 不传参数，立即返回，不阻塞
+        while (_pendingActions.TryTake(out var action))
+        {
+            action();
+
+            // 检查时间
+            if (Stopwatch.GetTimestamp() - startTimestamp > budgetTicks)
+                break;
+        }
+    }
+
+    public void RunOnUIThread(Action action)
+    {
+        _pendingActions.TryAdd(action);
     }
 
     private void RenderFrame()
