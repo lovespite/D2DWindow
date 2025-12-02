@@ -4,6 +4,7 @@ using SharpDX.Mathematics.Interop;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -18,6 +19,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     private readonly Stopwatch _sw = new();
     private readonly Stopwatch _fpsTimer = new();
     private readonly BlockingCollection<Action> _pendingActions = new(new ConcurrentQueue<Action>());
+    private readonly int _uiThreadId;
     private nint _handle;
     private Size _sz;
     private long _lastFrameTicks = 0;
@@ -113,6 +115,9 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     protected Direct2D1Window(string title, int width, int height)
     {
         _sz = new Size(width, height);
+        _uiThreadId = Environment.CurrentManagedThreadId; // 记录创建线程 ID
+        UISynchronizationContext = new D2DSynchronizationContext(this); // 创建 UI 线程同步上下文
+        SynchronizationContext.SetSynchronizationContext(UISynchronizationContext); // 安装同步上下文
         CreateInternal();
         InitializeDirect2D();
         SetTitle(title);
@@ -294,9 +299,94 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         _fpsTimer.Restart();
     }
 
+    private class UIThreadTaskScheduler(Direct2D1Window window) : TaskScheduler
+    {
+        protected override IEnumerable<Task>? GetScheduledTasks()
+        {
+            return null; // 不支持查询
+        }
+        protected override void QueueTask(Task task)
+        {
+            window.RunOnUIThread(() => TryExecuteTask(task));
+        }
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
+        {
+            if (Environment.CurrentManagedThreadId != window._uiThreadId) return false;
+            return TryExecuteTask(task);
+        }
+    }
+
+    /// <summary>
+    /// 自定义 SynchronizationContext，支持 Send（同步）和 Post（异步）。
+    /// </summary>
+    private class D2DSynchronizationContext(Direct2D1Window window) : SynchronizationContext
+    {
+        private readonly Direct2D1Window _window = window;
+
+        /// <summary>
+        /// 异步分发（对应 RunOnUIThread）。
+        /// </summary>
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            _window.RunOnUIThread(() => d(state));
+        }
+
+        /// <summary>
+        /// 同步分发。
+        /// </summary>
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            // 如果已经在 UI 线程，直接执行以避免死锁
+            if (Environment.CurrentManagedThreadId == _window._uiThreadId)
+            {
+                d(state);
+            }
+            else
+            {
+                // 如果在后台线程，需要阻塞直到 UI 线程执行完毕
+                using var handle = new ManualResetEventSlim(false);
+                Exception? error = null;
+
+                _window.RunOnUIThread(() =>
+                {
+                    try
+                    {
+                        d(state);
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ex;
+                    }
+                    finally
+                    {
+                        handle.Set();
+                    }
+                });
+
+                handle.Wait();
+
+                // 如果在 UI 线程执行时抛出了异常，我们需要在调用线程重新抛出它
+                if (error != null)
+                {
+                    ExceptionDispatchInfo.Capture(error).Throw();
+                }
+            }
+        }
+
+        public override SynchronizationContext CreateCopy()
+        {
+            return new D2DSynchronizationContext(_window);
+        }
+    }
+
     #endregion
 
     #region Public Properties
+
+    /// <summary>
+    /// 获取与 UI 线程关联的任务调度器。
+    /// </summary>
+    public SynchronizationContext UISynchronizationContext { get; }
 
     /// <summary>
     /// 获取窗口的原生句柄。
@@ -310,6 +400,11 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     /// Gets the current frames per second (FPS) value.
     /// </summary>
     public int FPS => _fps;
+
+    /// <summary>
+    /// Gets the total elapsed time measured by the timer, in milliseconds.
+    /// </summary>
+    public long ElapsedMilliseconds => _sw.ElapsedMilliseconds;
 
     /// <summary>
     /// 获取一个值，指示 Direct2D 渲染设备是否已就绪。
