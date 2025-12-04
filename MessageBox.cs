@@ -49,6 +49,8 @@ public enum MessageBoxResult
 /// </summary>
 public static class MessageBox
 {
+    public const uint MB_TOPMOST = 0x00040000;
+
     /// <summary>
     /// 显示一个具有指定文本、标题、按钮和图标的消息框。
     /// </summary>
@@ -61,9 +63,8 @@ public static class MessageBox
     public static MessageBoxResult Show(IntPtr owner, string text, string caption = "Message", MessageBoxButtons buttons = MessageBoxButtons.OK, MessageBoxIcon icon = MessageBoxIcon.None)
     {
         uint type = (uint)buttons | (uint)icon;
-        // 默认让消息框置顶，防止被全屏游戏窗口遮挡
-        // MB_TOPMOST = 0x00040000
-        type |= 0x00040000;
+        // 默认让消息框置顶，防止被全屏游戏窗口遮挡 
+        type |= MB_TOPMOST;
 
         int result = Win32Native.MessageBox(owner, text, caption, type);
         return (MessageBoxResult)result;
@@ -85,7 +86,7 @@ public static class MessageBox
     public static void ShowInfo(string text, string caption = "提示")
     {
         Show(IntPtr.Zero, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Information);
-    } 
+    }
 
     /// <summary>
     /// 显示一个信息提示框。
@@ -93,7 +94,7 @@ public static class MessageBox
     public static void ShowInfo(IWin32Owner owner, string text, string caption = "提示")
     {
         Show(owner.Handle, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Information);
-    } 
+    }
 
     /// <summary>
     /// 显示一个警告框。
@@ -137,5 +138,5 @@ public static class MessageBox
     {
         var result = Show(owner.Handle, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         return result == MessageBoxResult.Yes;
-    } 
+    }
 }
