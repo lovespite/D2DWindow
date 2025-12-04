@@ -20,6 +20,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     private readonly Stopwatch _fpsTimer = new();
     private readonly BlockingCollection<Action> _pendingActions = new(new ConcurrentQueue<Action>());
     private readonly int _uiThreadId;
+    private readonly nint _hInstance;
     private nint _handle;
     private Size _sz;
     private long _lastFrameTicks = 0;
@@ -116,6 +117,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     {
         _sz = new Size(width, height);
         _uiThreadId = Environment.CurrentManagedThreadId; // 记录创建线程 ID
+        _hInstance = Win32Native.GetModuleHandle(null);
         UISynchronizationContext = new D2DSynchronizationContext(this); // 创建 UI 线程同步上下文
         SynchronizationContext.SetSynchronizationContext(UISynchronizationContext); // 安装同步上下文
         CreateInternal();
@@ -126,8 +128,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #region Core Initialization
 
     private void CreateInternal()
-    {
-        nint hInstance = Win32Native.GetModuleHandle(null);
+    { 
         _wndProcDelegate = new Win32Native.WndProcDelegate(WndProc);
 
         var wndClass = new Win32Native.WNDCLASSEX
@@ -135,7 +136,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
             cbSize = Marshal.SizeOf<Win32Native.WNDCLASSEX>(),
             style = Win32Native.CS_HREDRAW | Win32Native.CS_VREDRAW | Win32Native.CS_OWNDC,
             lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
-            hInstance = hInstance,
+            hInstance = _hInstance,
             hCursor = Win32Native.LoadCursor(IntPtr.Zero, Win32Native.IDC_ARROW),
             lpszClassName = WindowClassName
         };
@@ -157,7 +158,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
             dwStyle: Win32Native.WS_OVERLAPPEDWINDOW | Win32Native.WS_VISIBLE,
             Win32Native.CW_USEDEFAULT, Win32Native.CW_USEDEFAULT,
             rect.Right - rect.Left, rect.Bottom - rect.Top,
-            IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
+            IntPtr.Zero, IntPtr.Zero, _hInstance, IntPtr.Zero);
 
         if (_handle == IntPtr.Zero)
         {
@@ -214,9 +215,14 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         {
             while (true)
             {
+                if (_handle == 0)
+                    break; // 窗体已经销毁
+
                 if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
                 {
-                    if (msg.message == Win32Native.WM_QUIT) break;
+                    if (msg.message == Win32Native.WM_QUIT)
+                        break;
+
                     Win32Native.TranslateMessage(ref msg);
                     Win32Native.DispatchMessage(ref msg);
                 }
@@ -848,6 +854,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
             case Win32Native.WM_DESTROY:
                 Win32Native.PostQuitMessage(0);
                 Win32Native.DestroyWindow(_handle);
+                _handle = 0;
                 return IntPtr.Zero;
 
             case Win32Native.WM_ERASEBKGND:
@@ -994,28 +1001,27 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #endregion
 
     #region IDisposable Support
+
     public virtual void Dispose()
     {
         _renderTarget?.Dispose();
         _factory?.Dispose();
 
-        if (_handle != IntPtr.Zero)
+        if (_handle != 0)
         {
-            // 1. 尝试销毁窗口
+            // 窗口销毁通常在 WM_DESTROY 处理
+            // 不过 WM_DESTROY 处理后 _handle 会被置 0
+            // 如果 _handle != 0, 说明我们没有收到 WM_DESTROY 消息
+
             // 如果是因为异常退出循环，窗口此时还存在，必须销毁。
             // 如果是因为用户点击关闭，窗口已被系统销毁，此调用会失败但无害。
             // 注意：DestroyWindow 必须在创建窗口的线程（主线程）调用。
             Win32Native.DestroyWindow(_handle);
-
-            // 2. 注销窗口类
-            // 只有当该类没有关联的窗口时，注销才会成功，所以必须先 DestroyWindow
-            IntPtr hInstance = Win32Native.GetModuleHandle(null);
-            Win32Native.UnregisterClass(WindowClassName, hInstance);
-
-            _handle = IntPtr.Zero;
         }
 
-        // 窗口销毁通常在 WM_DESTROY 处理，这里仅作为补充清理
+        // 只有当该类没有关联的窗口时，注销才会成功，所以必须先 DestroyWindow 
+        Win32Native.UnregisterClass(WindowClassName, _hInstance);
+
         _handle = IntPtr.Zero;
         GC.SuppressFinalize(this);
     }
