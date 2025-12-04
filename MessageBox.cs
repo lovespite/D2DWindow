@@ -85,7 +85,15 @@ public static class MessageBox
     public static void ShowInfo(string text, string caption = "提示")
     {
         Show(IntPtr.Zero, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
+    } 
+
+    /// <summary>
+    /// 显示一个信息提示框。
+    /// </summary>
+    public static void ShowInfo(IWin32Owner owner, string text, string caption = "提示")
+    {
+        Show(owner.Handle, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Information);
+    } 
 
     /// <summary>
     /// 显示一个警告框。
@@ -93,6 +101,14 @@ public static class MessageBox
     public static void ShowWarning(string text, string caption = "警告")
     {
         Show(IntPtr.Zero, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    /// <summary>
+    /// 显示一个警告框。
+    /// </summary>
+    public static void ShowWarning(IWin32Owner owner, string text, string caption = "警告")
+    {
+        Show(owner.Handle, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     /// <summary>
@@ -104,22 +120,22 @@ public static class MessageBox
     }
 
     /// <summary>
+    /// 显示一个错误框。
+    /// </summary>
+    public static void ShowError(IWin32Owner owner, string text, string caption = "错误")
+    {
+        Show(owner.Handle, text, caption, MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    /// <summary>
     /// 询问用户（是/否），返回 bool 值。
     /// </summary>
     /// <param name="text">询问内容。</param>
     /// <param name="caption">标题。</param>
     /// <returns>如果用户点击“是”返回 true，否则返回 false。</returns>
-    public static bool Ask(string text, string caption = "确认")
+    public static bool Ask(IWin32Owner owner, string text, string caption = "确认")
     {
-        var result = Show(IntPtr.Zero, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        var result = Show(owner.Handle, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
         return result == MessageBoxResult.Yes;
-    }
-
-    /// <summary>
-    /// 针对 D2DWindow 实例的扩展方法风格重载
-    /// </summary>
-    public static MessageBoxResult Show(this Direct2D1Window owner, string text, string caption = "Message", MessageBoxButtons buttons = MessageBoxButtons.OK, MessageBoxIcon icon = MessageBoxIcon.None)
-    {
-        return Show(owner.Handle, text, caption, buttons, icon);
-    }
+    } 
 }

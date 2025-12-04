@@ -128,7 +128,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #region Core Initialization
 
     private void CreateInternal()
-    { 
+    {
         _wndProcDelegate = new Win32Native.WndProcDelegate(WndProc);
 
         var wndClass = new Win32Native.WNDCLASSEX
@@ -194,16 +194,13 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #region Main Message Loop & Rendering
 
     /// <summary>
-    /// 帧时间，单位毫秒。
-    /// 默认帧率 60 FPS -> 约 16.67 ms
-    /// </summary>
-    public double TargetFrameTime { get; set; } = 1000d / 60;
-
-    /// <summary>
-    /// 启动高性能消息循环。
+    /// 启动消息循环。
     /// </summary>
     public void Run()
     {
+        if (Environment.CurrentManagedThreadId != _uiThreadId)
+            throw new InvalidOperationException("Run method must be called on the UI thread.");
+
         Win32Native.ShowWindow(_handle, 1);
         Win32Native.UpdateWindow(_handle);
         OnLoad();
@@ -215,9 +212,6 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         {
             while (true)
             {
-                if (_handle == 0)
-                    break; // 窗体已经销毁
-
                 if (Win32Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, Win32Native.PM_REMOVE))
                 {
                     if (msg.message == Win32Native.WM_QUIT)
@@ -242,6 +236,8 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
                     ProcessPendingActions(timeForActions);
                 }
             }
+
+            OnUnload();
         }
         finally
         {
@@ -388,6 +384,12 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     #endregion
 
     #region Public Properties
+
+    /// <summary>
+    /// 帧时间，单位毫秒。
+    /// 默认帧率 60 FPS -> 约 16.67 ms
+    /// </summary>
+    public double TargetFrameTime { get; set; } = 1000d / 60;
 
     /// <summary>
     /// 获取与 UI 线程关联的任务调度器。
@@ -840,18 +842,66 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         Resize?.Invoke(width, height);
     }
 
+    /// <summary>
+    /// Raises the closing event, allowing derived classes to cancel the window close operation.
+    /// </summary>
+    /// <remarks>Override this method in a derived class to implement custom logic that may conditionally
+    /// cancel the window closing process. The value of <paramref name="cancel"/> should be set to <see
+    /// langword="true"/> to cancel closing, or left unchanged to allow it.</remarks>
+    /// <param name="cancel">A reference to a Boolean value that determines whether the window closing operation should be canceled. Set to
+    /// <see langword="true"/> to prevent the window from closing; otherwise, <see langword="false"/>.</param>
+    protected virtual void OnClosing(ref bool cancel)
+    {
+#if DEBUG
+        Debug.WriteLine("{0}: Window closing.", nameof(OnClosing));
+#endif
+    }
+
+    /// <summary>
+    /// Invoked when the window has finished loading. Derived classes can override this method to perform additional
+    /// initialization after the window is loaded.
+    /// </summary>
+    /// <remarks>Override this method to execute custom logic when the window load event occurs. The base
+    /// implementation does not perform any actions other than diagnostic output.</remarks>
     protected virtual void OnLoad()
     {
+#if DEBUG
+        Debug.WriteLine("{0}: Window loaded.", nameof(OnLoad));
+#endif
+    }
+
+    /// <summary>
+    /// Raises the unload event for the window, allowing derived classes to perform cleanup or resource release
+    /// operations when the window is being unloaded.
+    /// </summary>
+    /// <remarks>Override this method in a derived class to implement custom logic that should execute when
+    /// the window is unloaded. This method is called as part of the window's lifecycle and is intended for resource
+    /// management or other teardown activities.</remarks>
+    protected virtual void OnUnload()
+    {
+#if DEBUG
+        Debug.WriteLine("{0}: Window unloaded.", nameof(OnUnload));
+#endif
     }
 
     #endregion
 
     #region Window Message Processing 
+
     protected virtual IntPtr HandleWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         switch (msg)
         {
+            case Win32Native.WM_CLOSE:
+                {
+                    bool cancel = false;
+                    OnClosing(ref cancel);
+                    if (cancel) return IntPtr.Zero; // 取消关闭 
+                }
+                break;
+
             case Win32Native.WM_DESTROY:
+                if (_handle == 0) return 0; // 已经销毁
                 Win32Native.PostQuitMessage(0);
                 Win32Native.DestroyWindow(_handle);
                 _handle = 0;
