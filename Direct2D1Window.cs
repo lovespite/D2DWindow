@@ -95,6 +95,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
     // 提供给子类访问 RenderTarget
     protected WindowRenderTarget RenderTarget => _renderTarget ?? throw new InvalidOperationException("RenderTarget is not initialized yet.");
     protected Factory1 Factory => _factory ?? throw new InvalidOperationException("Factory is not initialized yet.");
+    protected int UIThreadId => _uiThreadId;
 
     #region Events
 
