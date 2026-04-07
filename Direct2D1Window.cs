@@ -266,6 +266,12 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
 
     public void RunOnUIThread(Action action)
     {
+        if (Environment.CurrentManagedThreadId == UIThreadId)
+        {
+            // 如果已经在 UI 线程，直接执行，防止死锁
+            action();
+            return;
+        }
         _pendingActions.TryAdd(action);
     }
 
