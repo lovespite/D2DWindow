@@ -275,6 +275,31 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         _pendingActions.TryAdd(action);
     }
 
+    public Task<T> RunOnUIThread<T>(Func<T> func)
+    {
+        if (Environment.CurrentManagedThreadId == UIThreadId)
+        {
+            return Task.FromResult(func());
+        }
+
+        var tcs = new TaskCompletionSource<T>();
+
+        _pendingActions.TryAdd(() =>
+        {
+            try
+            {
+                T result = func();
+                tcs.SetResult(result);
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
+
+        return tcs.Task;
+    }
+
     private void RenderFrame()
     {
         if (_renderTarget is null) return;
