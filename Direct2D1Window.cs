@@ -179,7 +179,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         {
             Hwnd = _handle,
             PixelSize = new Size2(Width, Height),
-            PresentOptions = PresentOptions.None, // 垂直同步可在这里控制 
+            PresentOptions = VSync ? PresentOptions.RetainContents : PresentOptions.None, // 垂直同步可在这里控制 
         };
 
         _renderTarget = new WindowRenderTarget(_factory, renderTargetProperties, hwndRenderTargetProperties)
@@ -550,9 +550,30 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         set => SetStyle(Win32Native.WS_MAXIMIZEBOX, value);
     }
 
+    /// <summary>
+    /// Gets a value indicating whether vertical synchronization (VSync) is enabled for rendering.
+    /// </summary>
+    /// <remarks>Enabling VSync synchronizes the frame rate with the display's refresh rate to reduce screen
+    /// tearing. Disabling VSync may increase rendering performance but can result in visual artifacts.</remarks>
+    public virtual bool VSync { get; } = true;
+
     #endregion
 
     #region Public Methods
+    public void EnableFPSCounter(bool enable)
+    {
+        if (enable)
+        {
+            _frameCount = 0;
+            _fpsTimer.Restart();
+        }
+        else
+        {
+            _fpsTimer.Stop();
+            _fps = 0;
+            _frameCount = 0;
+        }
+    }
 
     public void Close()
     {
