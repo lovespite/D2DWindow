@@ -300,6 +300,50 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         return tcs.Task;
     }
 
+    public async Task<T> RunOnUIThreadAsync<T>(Func<Task<T>> func)
+    {
+        if (Environment.CurrentManagedThreadId == UIThreadId)
+        {
+            return await func();
+        }
+        var tcs = new TaskCompletionSource<T>();
+        _pendingActions.TryAdd(async () =>
+        {
+            try
+            {
+                T result = await func();
+                tcs.SetResult(result);
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
+        return await tcs.Task;
+    }
+
+    public async Task RunOnUIThreadAsync(Func<Task> func)
+    {
+        if (Environment.CurrentManagedThreadId == UIThreadId)
+        {
+            await func();
+        }
+        var tcs = new TaskCompletionSource();
+        _pendingActions.TryAdd(async () =>
+        {
+            try
+            {
+                await func();
+                tcs.SetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        });
+        await tcs.Task;
+    }
+
     private void RenderFrame()
     {
         if (_renderTarget is null) return;
