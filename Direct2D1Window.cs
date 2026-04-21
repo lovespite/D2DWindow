@@ -327,6 +327,7 @@ public abstract class Direct2D1Window : IDisposable, IWin32Owner
         if (Environment.CurrentManagedThreadId == UIThreadId)
         {
             await func();
+            return;
         }
         var tcs = new TaskCompletionSource();
         _pendingActions.TryAdd(async () =>
