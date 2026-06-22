@@ -156,24 +156,22 @@ public class FileDialog
             ofn.Flags |= Win32Native.OFN_ALLOWMULTISELECT;
         }
 
-        // 关键：手动分配缓冲区以接收文件名
-        // 对于多选，Win32 API 推荐使用较大的缓冲区（通常 32KB 足够）
+        // 手动分配缓冲区以接收文件名（Unicode 字符占 2 字节）
         const int bufferSize = 32768;
         ofn.nMaxFile = bufferSize;
-        ofn.lpstrFile = Marshal.AllocHGlobal(bufferSize * 2); // Unicode 字符占 2 字节
+        ofn.lpstrFile = Marshal.AllocHGlobal(bufferSize * 2);
 
-        // 初始化缓冲区
+        // 将整个缓冲区清零。
+        // AllocHGlobal 不保证内存清零，若 GetOpenFileNameW 未在路径末尾补足双空字符，
+        // PtrToStringUni 会读到未初始化的堆数据，产生尾随垃圾字符。
+        Marshal.Copy(new byte[bufferSize * 2], 0, ofn.lpstrFile, bufferSize * 2);
+
+        // 如果有预设文件名，写入缓冲区
         if (!string.IsNullOrEmpty(FileName))
         {
-            // 简单预设文件名逻辑
             var chars = FileName.ToCharArray();
             int len = Math.Min(chars.Length, bufferSize - 2);
             Marshal.Copy(chars, 0, ofn.lpstrFile, len);
-            Marshal.WriteInt16(ofn.lpstrFile, len * 2, 0);
-        }
-        else
-        {
-            Marshal.WriteInt16(ofn.lpstrFile, 0);
         }
 
         try
